@@ -34,6 +34,8 @@ export default function TrackPicker() {
       title: track.title,
       artist: track.artist,
       audioUrl: track.audioUrl,
+      sourceType: "audio",
+      youtubeVideoId: null,
     });
     setResults([]);
     setQuery("");
