@@ -17,6 +17,8 @@ const roomSchema = new mongoose.Schema(
       title: { type: String, default: null },
       artist: { type: String, default: null },
       audioUrl: { type: String, default: null },
+      sourceType: { type: String, enum: ["audio", "youtube"], default: "audio" },
+      youtubeVideoId: { type: String, default: null },
     },
     playbackState: {
       isPlaying: { type: Boolean, default: false },

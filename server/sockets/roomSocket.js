@@ -59,8 +59,13 @@ export function registerRoomHandlers(io, socket) {
       const room = await Room.findOne({ code });
       if (!room) return;
 
-      room.playbackState.isPlaying = type === "play";
-      room.playbackState.positionSeconds = positionSeconds;
+      if (type === "seek") {
+        // Seeking shouldn't change whether the track is playing or paused
+        room.playbackState.positionSeconds = positionSeconds;
+      } else {
+        room.playbackState.isPlaying = type === "play";
+        room.playbackState.positionSeconds = positionSeconds;
+      }
       room.playbackState.lastUpdatedAt = new Date();
       await room.save();
 
@@ -77,7 +82,7 @@ export function registerRoomHandlers(io, socket) {
   });
 
   // Host changes the track
-  socket.on("change-track", async ({ code, trackId, title, artist, audioUrl }) => {
+  socket.on("change-track", async ({ code, trackId, title, artist, audioUrl, sourceType, youtubeVideoId }) => {
     try {
       const hostId = roomHosts.get(code);
       if (socket.id !== hostId) return;
@@ -85,7 +90,7 @@ export function registerRoomHandlers(io, socket) {
       const room = await Room.findOne({ code });
       if (!room) return;
 
-      room.currentTrack = { trackId, title, artist, audioUrl };
+      room.currentTrack = { trackId, title, artist, audioUrl, sourceType, youtubeVideoId };
       room.playbackState = {
         isPlaying: false,
         positionSeconds: 0,
@@ -93,9 +98,39 @@ export function registerRoomHandlers(io, socket) {
       };
       await room.save();
 
-      io.to(code).emit("track-changed", { trackId, title, artist, audioUrl });
+      io.to(code).emit("track-changed", { trackId, title, artist, audioUrl, sourceType, youtubeVideoId });
     } catch (err) {
       console.error("Error in change-track:", err);
+    }
+  });
+
+  // Host removes the current track entirely
+  socket.on("clear-track", async ({ code }) => {
+    try {
+      const hostId = roomHosts.get(code);
+      if (socket.id !== hostId) return;
+
+      const room = await Room.findOne({ code });
+      if (!room) return;
+
+      room.currentTrack = {
+        trackId: null,
+        title: null,
+        artist: null,
+        audioUrl: null,
+        sourceType: "audio",
+        youtubeVideoId: null,
+      };
+      room.playbackState = {
+        isPlaying: false,
+        positionSeconds: 0,
+        lastUpdatedAt: new Date(),
+      };
+      await room.save();
+
+      io.to(code).emit("track-changed", room.currentTrack);
+    } catch (err) {
+      console.error("Error in clear-track:", err);
     }
   });
 
