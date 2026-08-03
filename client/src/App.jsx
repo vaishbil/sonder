@@ -1,13 +1,13 @@
 import { useState } from "react";
 import Home from "./components/Home";
-import Room from "./components/Room";
+import ServerRoom from "./components/ServerRoom";
 
 export default function App() {
-  const [inRoom, setInRoom] = useState(false);
+  const [inServer, setInServer] = useState(false);
 
-  return inRoom ? (
-    <Room onLeaveRoom={() => setInRoom(false)} />
+  return inServer ? (
+    <ServerRoom onLeaveServer={() => setInServer(false)} />
   ) : (
-    <Home onEnterRoom={() => setInRoom(true)} />
+    <Home onEnterServer={() => setInServer(true)} />
   );
 }
