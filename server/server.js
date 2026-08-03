@@ -3,20 +3,19 @@ dotenv.config();
 
 import express from "express";
 import http from "http";
-import { Server } from "socket.io";
+import { Server as SocketIOServer } from "socket.io";
 import cors from "cors";
 import mongoose from "mongoose";
 
-import roomsRouter from "./routes/rooms.js";
-import tracksRouter from "./routes/tracks.js";
-import { registerRoomHandlers } from "./sockets/roomSocket.js";
+import serversRouter from "./routes/servers.js";
+import { registerServerHandlers } from "./sockets/serverSocket.js";
 
 const app = express();
 const server = http.createServer(app);
 
 const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:5173";
 
-const io = new Server(server, {
+const io = new SocketIOServer(server, {
   cors: {
     origin: CLIENT_URL,
     methods: ["GET", "POST"],
@@ -26,21 +25,17 @@ const io = new Server(server, {
 app.use(cors({ origin: CLIENT_URL }));
 app.use(express.json());
 
-// REST routes
-app.use("/rooms", roomsRouter);
-app.use("/tracks", tracksRouter);
+app.use("/servers", serversRouter);
 
 app.get("/", (req, res) => {
-  res.send("Sonder backend is running");
+  res.send("Mini Discord backend is running");
 });
 
-// Socket.io connection handling
 io.on("connection", (socket) => {
   console.log(`New connection: ${socket.id}`);
-  registerRoomHandlers(io, socket);
+  registerServerHandlers(io, socket);
 });
 
-// Connect to MongoDB then start server
 const PORT = process.env.PORT || 5000;
 
 mongoose
