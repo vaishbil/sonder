@@ -28,6 +28,15 @@ export const useServerStore = create((set) => ({
       ),
     })),
 
+  removeMessage: (channelId, messageId) =>
+    set((state) => ({
+      channels: state.channels.map((c) =>
+        c.channelId === channelId
+          ? { ...c, messages: c.messages.filter((m) => m.messageId !== messageId) }
+          : c
+      ),
+    })),
+
   addChannel: (channel) =>
     set((state) => ({ channels: [...state.channels, channel] })),
 

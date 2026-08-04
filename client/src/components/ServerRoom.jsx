@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { socket } from "../socket";
 import { useServerStore } from "../store/useServerStore";
+import { Search, MessageSquareReply } from "lucide-react";
 
 const API_URL = import.meta.env.VITE_SERVER_URL || "http://localhost:5000";
 const AVATAR_COLORS = ["#FF6B4A", "#FFA07A", "#FF8C69", "#E9967A", "#FFB088", "#F4978E"];
@@ -50,34 +51,6 @@ function MessageText({ text, memberNames }) {
   );
 }
 
-function Attachment({ attachment }) {
-  if (!attachment?.url) return null;
-  const fullUrl = `${API_URL}${attachment.url}`;
-
-  if (attachment.type?.startsWith("image/")) {
-    return (
-      <a href={fullUrl} target="_blank" rel="noopener noreferrer">
-        <img
-          src={fullUrl}
-          alt={attachment.filename}
-          className="mt-1 max-w-xs max-h-64 rounded-xl border border-[#F0DCD1]"
-        />
-      </a>
-    );
-  }
-
-  return (
-    <a
-      href={fullUrl}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="mt-1 inline-flex items-center gap-2 bg-[#FDEAE1] rounded-lg px-3 py-2 text-xs text-[#8A7A72] hover:bg-[#FFE3D6]"
-    >
-      📎 {attachment.filename}
-    </a>
-  );
-}
-
 export default function ServerRoom({ onLeaveServer }) {
   const {
     serverCode,
@@ -92,6 +65,7 @@ export default function ServerRoom({ onLeaveServer }) {
     setMembers,
     setCurrentChannel,
     addMessage,
+    removeMessage,
     addChannel,
     removeChannel,
     setTyping,
@@ -108,6 +82,8 @@ export default function ServerRoom({ onLeaveServer }) {
   const [searching, setSearching] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [mentionSuggestions, setMentionSuggestions] = useState([]);
+  const [replyingTo, setReplyingTo] = useState(null);
+  const [hiddenMessageIds, setHiddenMessageIds] = useState(new Set());
 
   const messagesEndRef = useRef(null);
   const typingTimeoutRef = useRef(null);
@@ -117,12 +93,16 @@ export default function ServerRoom({ onLeaveServer }) {
   const currentChannel = channels.find((c) => c.channelId === currentChannelId);
   const typingInChannel = (typingUsers[currentChannelId] || []).filter((u) => u !== username);
   const memberNames = members.map((m) => m.username);
+  const visibleMessages = (currentChannel?.messages || []).filter(
+    (m) => !hiddenMessageIds.has(m.messageId)
+  );
 
   useEffect(() => {
     socket.on("server-state", (state) => setServerState(state));
     socket.on("member-joined", ({ members: updatedMembers }) => setMembers(updatedMembers));
     socket.on("member-left", ({ members: updatedMembers }) => setMembers(updatedMembers));
     socket.on("new-message", ({ channelId, message }) => addMessage(channelId, message));
+    socket.on("message-deleted", ({ channelId, messageId }) => removeMessage(channelId, messageId));
     socket.on("channel-created", (channel) => addChannel(channel));
     socket.on("channel-deleted", ({ channelId }) => removeChannel(channelId));
     socket.on("user-typing", ({ channelId, username: u }) => setTyping(channelId, u, true));
@@ -138,6 +118,7 @@ export default function ServerRoom({ onLeaveServer }) {
       socket.off("member-joined");
       socket.off("member-left");
       socket.off("new-message");
+      socket.off("message-deleted");
       socket.off("channel-created");
       socket.off("channel-deleted");
       socket.off("user-typing");
@@ -155,10 +136,18 @@ export default function ServerRoom({ onLeaveServer }) {
     e.preventDefault();
     const text = messageInput.trim();
     if (!text) return;
-    socket.emit("send-message", { code: serverCode, channelId: currentChannelId, text });
+    socket.emit("send-message", {
+      code: serverCode,
+      channelId: currentChannelId,
+      text,
+      replyTo: replyingTo
+        ? { messageId: replyingTo.messageId, sender: replyingTo.sender, text: replyingTo.text }
+        : undefined,
+    });
     socket.emit("stop-typing", { code: serverCode, channelId: currentChannelId, username });
     setMessageInput("");
     setMentionSuggestions([]);
+    setReplyingTo(null);
   }
 
   function handleInputChange(e) {
@@ -170,7 +159,6 @@ export default function ServerRoom({ onLeaveServer }) {
       socket.emit("stop-typing", { code: serverCode, channelId: currentChannelId, username });
     }, 2000);
 
-    // Detect an in-progress @mention at the end of the text
     const match = value.match(/@(\w*)$/);
     if (match) {
       const query = match[1].toLowerCase();
@@ -210,13 +198,12 @@ export default function ServerRoom({ onLeaveServer }) {
         console.error("Upload response error:", res.status, data);
         throw new Error(data.error || `Upload failed (status ${res.status})`);
       }
-      const attachment = data;
 
       socket.emit("send-message", {
         code: serverCode,
         channelId: currentChannelId,
         text: "",
-        attachment,
+        attachment: data,
       });
     } catch (err) {
       console.error("Upload error:", err);
@@ -244,11 +231,15 @@ export default function ServerRoom({ onLeaveServer }) {
     }
   }
 
+  function closeSearch() {
+    setShowSearch(false);
+    setSearchQuery("");
+    setSearchResults([]);
+  }
+
   function jumpToResult(result) {
     setCurrentChannel(result.channelId);
-    setShowSearch(false);
-    setSearchResults([]);
-    setSearchQuery("");
+    closeSearch();
   }
 
   function handleCreateChannel(e) {
@@ -268,8 +259,25 @@ export default function ServerRoom({ onLeaveServer }) {
   function handleKick(targetSocketId, targetUsername) {
     if (!confirm(`Remove ${targetUsername} from this server?`)) return;
     socket.emit("kick-member", { code: serverCode, targetSocketId });
-    // Optimistic update so the owner sees immediate feedback
     setMembers(members.filter((m) => m.socketId !== targetSocketId));
+  }
+
+  function handleDeleteForEveryone(messageId) {
+    if (!confirm("Delete this message for everyone? This can't be undone.")) return;
+    socket.emit("delete-message", { code: serverCode, channelId: currentChannelId, messageId });
+  }
+
+  function handleDeleteForMe(messageId) {
+    setHiddenMessageIds((prev) => new Set(prev).add(messageId));
+  }
+
+  function handleReply(message) {
+    setReplyingTo({
+      messageId: message.messageId,
+      sender: message.sender,
+      text: message.text || (message.attachment ? "📎 Attachment" : ""),
+    });
+    messageInputRef.current?.focus();
   }
 
   function handleLeave() {
@@ -348,11 +356,11 @@ export default function ServerRoom({ onLeaveServer }) {
         <div className="border-b border-[#FDEAE1] px-5 py-4 flex items-center justify-between">
           <h3 className="font-medium"># {currentChannel?.name || currentChannelId}</h3>
           <button
-            onClick={() => setShowSearch((s) => !s)}
+            onClick={() => (showSearch ? closeSearch() : setShowSearch(true))}
             className="text-[#B39A8F] hover:text-[#FF6B4A] text-sm"
             title="Search messages"
           >
-            🔍
+            <Search/>
           </button>
         </div>
 
@@ -374,6 +382,14 @@ export default function ServerRoom({ onLeaveServer }) {
               >
                 {searching ? "..." : "Search"}
               </button>
+              <button
+                type="button"
+                onClick={closeSearch}
+                className="text-[#B39A8F] hover:text-[#FF6B4A] px-2"
+                title="Close search"
+              >
+                ✕
+              </button>
             </form>
             {searchResults.length > 0 && (
               <div className="max-h-48 overflow-y-auto space-y-1">
@@ -394,19 +410,80 @@ export default function ServerRoom({ onLeaveServer }) {
         )}
 
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
-          {(currentChannel?.messages || []).map((m, i) => (
-            <div key={i} className="flex items-start gap-2">
-              <Avatar name={m.sender} size={28} />
-              <div className="min-w-0">
-                <span className="font-medium text-sm text-[#3A2E2A]">{m.sender}</span>{" "}
-                <span className="text-[#B39A8F] text-xs">
-                  {new Date(m.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                </span>
-                <MessageText text={m.text} memberNames={memberNames} />
-                <Attachment attachment={m.attachment} />
+          {visibleMessages.map((m) => {
+            const isOwnMessage = m.sender === username;
+            const fullImageUrl = m.attachment?.url ? `${API_URL}${m.attachment.url}` : null;
+
+            return (
+              <div key={m.messageId || m.timestamp} className="flex items-start gap-2 group">
+                <Avatar name={m.sender} size={28} />
+                <div className="min-w-0 flex-1">
+                  <span className="font-medium text-sm text-[#3A2E2A]">{m.sender}</span>{" "}
+                  <span className="text-[#B39A8F] text-xs">
+                    {new Date(m.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  </span>
+
+                  {m.replyTo && (
+                    <div className="border-l-2 border-[#FF6B4A] pl-2 mb-1 mt-1">
+                      <p className="text-xs text-[#B39A8F]">
+                        Replying to <span className="font-medium">{m.replyTo.sender}</span>
+                      </p>
+                      <p className="text-xs text-[#8A7A72] truncate">{m.replyTo.text}</p>
+                    </div>
+                  )}
+
+                  <MessageText text={m.text} memberNames={memberNames} />
+
+                  {fullImageUrl && (
+                    <div className="relative inline-block mt-1">
+                      <a href={fullImageUrl} target="_blank" rel="noopener noreferrer">
+                        {m.attachment.type?.startsWith("image/") ? (
+                          <img
+                            src={fullImageUrl}
+                            alt={m.attachment.filename}
+                            className="max-w-xs max-h-64 rounded-xl border border-[#F0DCD1]"
+                          />
+                        ) : (
+                          <span className="inline-flex items-center gap-2 bg-[#FDEAE1] rounded-lg px-3 py-2 text-xs text-[#8A7A72] hover:bg-[#FFE3D6]">
+                            📎 {m.attachment.filename}
+                          </span>
+                        )}
+                      </a>
+                      {isOwnMessage && m.attachment.type?.startsWith("image/") && (
+                        <button
+                          onClick={() => handleDeleteForEveryone(m.messageId)}
+                          className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 bg-black/60 hover:bg-black/80 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs transition"
+                          title="Delete image for everyone"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Hover action bar */}
+                  {m.messageId && (
+                    <div className="opacity-0 group-hover:opacity-100 transition flex gap-3 mt-1 text-xs text-[#B39A8F]">
+                      <button onClick={() => handleReply(m)} className="hover:text-[#FF6B4A]">
+                        <MessageSquareReply/> 
+                      </button>
+                      <button onClick={() => handleDeleteForMe(m.messageId)} className="hover:text-[#FF6B4A]">
+                        Delete for me
+                      </button>
+                      {isOwnMessage && (
+                        <button
+                          onClick={() => handleDeleteForEveryone(m.messageId)}
+                          className="hover:text-red-500"
+                        >
+                          Delete for everyone
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
           <div ref={messagesEndRef} />
         </div>
 
@@ -414,6 +491,20 @@ export default function ServerRoom({ onLeaveServer }) {
           <p className="text-xs text-[#B39A8F] px-5 pb-1">
             {typingInChannel.join(", ")} {typingInChannel.length === 1 ? "is" : "are"} typing...
           </p>
+        )}
+
+        {replyingTo && (
+          <div className="mx-4 mb-2 flex items-center justify-between bg-[#FDEAE1] rounded-lg px-3 py-2">
+            <p className="text-xs text-[#8A7A72] truncate">
+              Replying to <span className="font-medium">{replyingTo.sender}</span>: {replyingTo.text}
+            </p>
+            <button
+              onClick={() => setReplyingTo(null)}
+              className="text-[#B39A8F] hover:text-[#FF6B4A] text-xs ml-2 shrink-0"
+            >
+              ✕
+            </button>
+          </div>
         )}
 
         <div className="relative">
