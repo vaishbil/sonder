@@ -2,7 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import { socket } from "../socket";
 import { useServerStore } from "../store/useServerStore";
 
+const API_URL = import.meta.env.VITE_SERVER_URL || "http://localhost:5000";
 const AVATAR_COLORS = ["#FF6B4A", "#FFA07A", "#FF8C69", "#E9967A", "#FFB088", "#F4978E"];
+
+const EMOJIS = [
+  "😀", "😂", "😍", "🥳", "😎", "🤔", "😢", "😡", "👍", "👎",
+  "🙌", "👏", "🔥", "💯", "🎉", "❤️", "💀", "😭", "🙏", "✨",
+  "😴", "🤯", "😅", "🥺", "🫡", "🤝", "👀", "🚀", "💡", "⚡",
+];
 
 function avatarColor(name) {
   const index = (name?.charCodeAt(0) || 0) % AVATAR_COLORS.length;
@@ -17,6 +24,57 @@ function Avatar({ name, size = 32 }) {
     >
       {name?.charAt(0)?.toUpperCase() || "?"}
     </div>
+  );
+}
+
+function MessageText({ text, memberNames }) {
+  if (!text) return null;
+  const parts = text.split(/(@\w+)/g);
+  return (
+    <p className="text-sm text-[#5A4A42] break-words">
+      {parts.map((part, i) => {
+        if (part.startsWith("@")) {
+          const name = part.slice(1);
+          const isRealMember = memberNames.some((m) => m.toLowerCase() === name.toLowerCase());
+          if (isRealMember) {
+            return (
+              <span key={i} className="bg-[#FFE3D6] text-[#FF6B4A] font-medium px-1 rounded">
+                {part}
+              </span>
+            );
+          }
+        }
+        return <span key={i}>{part}</span>;
+      })}
+    </p>
+  );
+}
+
+function Attachment({ attachment }) {
+  if (!attachment?.url) return null;
+  const fullUrl = `${API_URL}${attachment.url}`;
+
+  if (attachment.type?.startsWith("image/")) {
+    return (
+      <a href={fullUrl} target="_blank" rel="noopener noreferrer">
+        <img
+          src={fullUrl}
+          alt={attachment.filename}
+          className="mt-1 max-w-xs max-h-64 rounded-xl border border-[#F0DCD1]"
+        />
+      </a>
+    );
+  }
+
+  return (
+    <a
+      href={fullUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="mt-1 inline-flex items-center gap-2 bg-[#FDEAE1] rounded-lg px-3 py-2 text-xs text-[#8A7A72] hover:bg-[#FFE3D6]"
+    >
+      📎 {attachment.filename}
+    </a>
   );
 }
 
@@ -43,11 +101,22 @@ export default function ServerRoom({ onLeaveServer }) {
   const [messageInput, setMessageInput] = useState("");
   const [newChannelName, setNewChannelName] = useState("");
   const [showNewChannelInput, setShowNewChannelInput] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [mentionSuggestions, setMentionSuggestions] = useState([]);
+
   const messagesEndRef = useRef(null);
   const typingTimeoutRef = useRef(null);
+  const fileInputRef = useRef(null);
+  const messageInputRef = useRef(null);
 
   const currentChannel = channels.find((c) => c.channelId === currentChannelId);
   const typingInChannel = (typingUsers[currentChannelId] || []).filter((u) => u !== username);
+  const memberNames = members.map((m) => m.username);
 
   useEffect(() => {
     socket.on("server-state", (state) => setServerState(state));
@@ -89,15 +158,97 @@ export default function ServerRoom({ onLeaveServer }) {
     socket.emit("send-message", { code: serverCode, channelId: currentChannelId, text });
     socket.emit("stop-typing", { code: serverCode, channelId: currentChannelId, username });
     setMessageInput("");
+    setMentionSuggestions([]);
   }
 
   function handleInputChange(e) {
-    setMessageInput(e.target.value);
+    const value = e.target.value;
+    setMessageInput(value);
     socket.emit("typing", { code: serverCode, channelId: currentChannelId, username });
     clearTimeout(typingTimeoutRef.current);
     typingTimeoutRef.current = setTimeout(() => {
       socket.emit("stop-typing", { code: serverCode, channelId: currentChannelId, username });
     }, 2000);
+
+    // Detect an in-progress @mention at the end of the text
+    const match = value.match(/@(\w*)$/);
+    if (match) {
+      const query = match[1].toLowerCase();
+      const matches = memberNames.filter(
+        (name) => name.toLowerCase().startsWith(query) && name !== username
+      );
+      setMentionSuggestions(matches.slice(0, 5));
+    } else {
+      setMentionSuggestions([]);
+    }
+  }
+
+  function selectMention(name) {
+    const newValue = messageInput.replace(/@(\w*)$/, `@${name} `);
+    setMessageInput(newValue);
+    setMentionSuggestions([]);
+    messageInputRef.current?.focus();
+  }
+
+  function insertEmoji(emoji) {
+    setMessageInput((prev) => prev + emoji);
+    setShowEmojiPicker(false);
+    messageInputRef.current?.focus();
+  }
+
+  async function handleFileSelect(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch(`${API_URL}/upload`, { method: "POST", body: formData });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        console.error("Upload response error:", res.status, data);
+        throw new Error(data.error || `Upload failed (status ${res.status})`);
+      }
+      const attachment = data;
+
+      socket.emit("send-message", {
+        code: serverCode,
+        channelId: currentChannelId,
+        text: "",
+        attachment,
+      });
+    } catch (err) {
+      console.error("Upload error:", err);
+      alert(`File upload failed: ${err.message}`);
+    } finally {
+      setUploading(false);
+      e.target.value = "";
+    }
+  }
+
+  async function handleSearch(e) {
+    e.preventDefault();
+    if (!searchQuery.trim()) return;
+    setSearching(true);
+    try {
+      const res = await fetch(
+        `${API_URL}/servers/${serverCode}/search?q=${encodeURIComponent(searchQuery)}`
+      );
+      const data = await res.json();
+      setSearchResults(data);
+    } catch (err) {
+      console.error("Search failed:", err);
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  function jumpToResult(result) {
+    setCurrentChannel(result.channelId);
+    setShowSearch(false);
+    setSearchResults([]);
+    setSearchQuery("");
   }
 
   function handleCreateChannel(e) {
@@ -114,8 +265,11 @@ export default function ServerRoom({ onLeaveServer }) {
     socket.emit("delete-channel", { code: serverCode, channelId });
   }
 
-  function handleKick(targetSocketId) {
+  function handleKick(targetSocketId, targetUsername) {
+    if (!confirm(`Remove ${targetUsername} from this server?`)) return;
     socket.emit("kick-member", { code: serverCode, targetSocketId });
+    // Optimistic update so the owner sees immediate feedback
+    setMembers(members.filter((m) => m.socketId !== targetSocketId));
   }
 
   function handleLeave() {
@@ -191,20 +345,65 @@ export default function ServerRoom({ onLeaveServer }) {
 
       {/* Chat area */}
       <div className="flex-1 flex flex-col m-3 bg-white rounded-2xl shadow-sm overflow-hidden">
-        <div className="border-b border-[#FDEAE1] px-5 py-4">
+        <div className="border-b border-[#FDEAE1] px-5 py-4 flex items-center justify-between">
           <h3 className="font-medium"># {currentChannel?.name || currentChannelId}</h3>
+          <button
+            onClick={() => setShowSearch((s) => !s)}
+            className="text-[#B39A8F] hover:text-[#FF6B4A] text-sm"
+            title="Search messages"
+          >
+            🔍
+          </button>
         </div>
+
+        {showSearch && (
+          <div className="border-b border-[#FDEAE1] px-5 py-3 bg-[#FFF9F6]">
+            <form onSubmit={handleSearch} className="flex gap-2 mb-2">
+              <input
+                type="text"
+                autoFocus
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search all messages in this server..."
+                className="flex-1 bg-white rounded-lg px-3 py-2 text-sm outline-none border border-[#F0DCD1] focus:ring-2 focus:ring-[#FF6B4A]"
+              />
+              <button
+                type="submit"
+                disabled={searching}
+                className="bg-[#FF6B4A] hover:bg-[#FF5733] text-white rounded-lg px-4 py-2 text-sm disabled:opacity-50"
+              >
+                {searching ? "..." : "Search"}
+              </button>
+            </form>
+            {searchResults.length > 0 && (
+              <div className="max-h-48 overflow-y-auto space-y-1">
+                {searchResults.map((r, i) => (
+                  <button
+                    key={i}
+                    onClick={() => jumpToResult(r)}
+                    className="w-full text-left px-3 py-2 rounded-lg hover:bg-white text-xs"
+                  >
+                    <span className="text-[#FF6B4A] font-medium">#{r.channelName}</span>{" "}
+                    <span className="text-[#8A7A72]">— {r.sender}: </span>
+                    <span className="text-[#5A4A42]">{r.text}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
           {(currentChannel?.messages || []).map((m, i) => (
             <div key={i} className="flex items-start gap-2">
               <Avatar name={m.sender} size={28} />
-              <div>
+              <div className="min-w-0">
                 <span className="font-medium text-sm text-[#3A2E2A]">{m.sender}</span>{" "}
                 <span className="text-[#B39A8F] text-xs">
                   {new Date(m.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                 </span>
-                <p className="text-sm text-[#5A4A42]">{m.text}</p>
+                <MessageText text={m.text} memberNames={memberNames} />
+                <Attachment attachment={m.attachment} />
               </div>
             </div>
           ))}
@@ -217,21 +416,77 @@ export default function ServerRoom({ onLeaveServer }) {
           </p>
         )}
 
-        <form onSubmit={handleSendMessage} className="p-4 flex gap-2 border-t border-[#FDEAE1]">
-          <input
-            type="text"
-            value={messageInput}
-            onChange={handleInputChange}
-            placeholder={`Message #${currentChannel?.name || currentChannelId}`}
-            className="flex-1 bg-[#FDEAE1] rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-[#FF6B4A] placeholder:text-[#B39A8F]"
-          />
-          <button
-            type="submit"
-            className="bg-[#FF6B4A] hover:bg-[#FF5733] text-white rounded-xl px-5 py-2.5 text-sm font-medium"
-          >
-            Send
-          </button>
-        </form>
+        <div className="relative">
+          {mentionSuggestions.length > 0 && (
+            <div className="absolute bottom-full left-16 mb-1 bg-white border border-[#F0DCD1] rounded-xl shadow-lg overflow-hidden z-10">
+              {mentionSuggestions.map((name) => (
+                <button
+                  key={name}
+                  onClick={() => selectMention(name)}
+                  className="flex items-center gap-2 w-full text-left px-3 py-2 hover:bg-[#FDEAE1] text-sm"
+                >
+                  <Avatar name={name} size={20} />
+                  {name}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {showEmojiPicker && (
+            <div className="absolute bottom-full right-4 mb-1 bg-white border border-[#F0DCD1] rounded-xl shadow-lg p-2 grid grid-cols-6 gap-1 z-10">
+              {EMOJIS.map((emoji) => (
+                <button
+                  key={emoji}
+                  onClick={() => insertEmoji(emoji)}
+                  className="text-xl hover:bg-[#FDEAE1] rounded p-1"
+                >
+                  {emoji}
+                </button>
+              ))}
+            </div>
+          )}
+
+          <form onSubmit={handleSendMessage} className="p-4 flex gap-2 border-t border-[#FDEAE1]">
+            <input
+              ref={fileInputRef}
+              type="file"
+              onChange={handleFileSelect}
+              className="hidden"
+              accept="image/*,.pdf,.zip,.txt,.docx"
+            />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              className="bg-[#FDEAE1] hover:bg-[#FFE3D6] text-[#8A7A72] rounded-xl px-3 text-lg disabled:opacity-50"
+              title="Attach a file"
+            >
+              {uploading ? "..." : "📎"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowEmojiPicker((s) => !s)}
+              className="bg-[#FDEAE1] hover:bg-[#FFE3D6] text-[#8A7A72] rounded-xl px-3 text-lg"
+              title="Emoji"
+            >
+              😀
+            </button>
+            <input
+              ref={messageInputRef}
+              type="text"
+              value={messageInput}
+              onChange={handleInputChange}
+              placeholder={`Message #${currentChannel?.name || currentChannelId}`}
+              className="flex-1 bg-[#FDEAE1] rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-[#FF6B4A] placeholder:text-[#B39A8F]"
+            />
+            <button
+              type="submit"
+              className="bg-[#FF6B4A] hover:bg-[#FF5733] text-white rounded-xl px-5 py-2.5 text-sm font-medium"
+            >
+              Send
+            </button>
+          </form>
+        </div>
       </div>
 
       {/* Member list */}
@@ -256,8 +511,8 @@ export default function ServerRoom({ onLeaveServer }) {
               </div>
               {isOwner && m.socketId !== socket.id && (
                 <button
-                  onClick={() => handleKick(m.socketId)}
-                  className="opacity-0 group-hover:opacity-100 text-xs text-[#B39A8F] hover:text-red-400 shrink-0"
+                  onClick={() => handleKick(m.socketId, m.username)}
+                  className="text-xs text-[#B39A8F] hover:text-red-400 shrink-0"
                 >
                   kick
                 </button>
