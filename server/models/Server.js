@@ -1,15 +1,26 @@
 import mongoose from "mongoose";
 
+const replyToSchema = new mongoose.Schema(
+  {
+    messageId: { type: String, required: true },
+    sender: { type: String, required: true },
+    text: { type: String, default: "" },
+  },
+  { _id: false }
+);
+
 const messageSchema = new mongoose.Schema(
   {
+    messageId: { type: String, required: true },
     sender: { type: String, required: true },
     text: { type: String, default: "" },
     timestamp: { type: Date, default: Date.now },
     attachment: {
       url: { type: String, default: null },
       filename: { type: String, default: null },
-      type: { type: String, default: null }, // MIME type, e.g. "image/png"
+      type: { type: String, default: null },
     },
+    replyTo: { type: replyToSchema, default: null },
   },
   { _id: false }
 );

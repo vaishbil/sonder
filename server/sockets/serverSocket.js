@@ -1,3 +1,6 @@
+import crypto from "crypto";
+import fs from "fs";
+import path from "path";
 import Server from "../models/Server.js";
 
 const serverOwners = new Map();
@@ -20,8 +23,8 @@ export function registerServerHandlers(io, socket) {
         server.ownerSocketId = socket.id;
       }
 
-      // Remove any stale entry for this username first (handles refreshes/
-      // reconnects that didn't clean up properly) so the list never shows ghosts
+      // Remove any stale entry for this username before adding fresh —
+      // prevents ghost duplicates from refreshes/reconnects
       server.members = server.members.filter((m) => m.username !== username);
       server.members.push({ socketId: socket.id, username });
       await server.save();
@@ -46,7 +49,7 @@ export function registerServerHandlers(io, socket) {
     }
   });
 
-  socket.on("send-message", async ({ code, channelId, text, attachment }) => {
+  socket.on("send-message", async ({ code, channelId, text, attachment, replyTo }) => {
     try {
       const server = await Server.findOne({ code });
       if (!server) return;
@@ -55,10 +58,12 @@ export function registerServerHandlers(io, socket) {
       if (!channel) return;
 
       const message = {
+        messageId: crypto.randomUUID(),
         sender: socket.data.username || "Unknown",
         text: text || "",
         timestamp: new Date(),
         attachment: attachment || undefined,
+        replyTo: replyTo || undefined,
       };
       channel.messages.push(message);
 
@@ -71,6 +76,41 @@ export function registerServerHandlers(io, socket) {
       io.to(code).emit("new-message", { channelId, message });
     } catch (err) {
       console.error("Error in send-message:", err);
+    }
+  });
+
+  // Delete for everyone — only the original sender can do this
+  socket.on("delete-message", async ({ code, channelId, messageId }) => {
+    try {
+      const server = await Server.findOne({ code });
+      if (!server) return;
+
+      const channel = server.channels.find((c) => c.channelId === channelId);
+      if (!channel) return;
+
+      const message = channel.messages.find((m) => m.messageId === messageId);
+      if (!message) return;
+
+      // Ownership check — only the sender can delete their own message for everyone
+      if (message.sender !== socket.data.username) {
+        socket.emit("error-message", "You can only delete your own messages.");
+        return;
+      }
+
+      // Clean up the actual file on disk if this message had an image/attachment
+      if (message.attachment?.url) {
+        const filePath = path.join(process.cwd(), message.attachment.url);
+        fs.unlink(filePath, (err) => {
+          if (err) console.error("Failed to delete attachment file:", err.message);
+        });
+      }
+
+      channel.messages = channel.messages.filter((m) => m.messageId !== messageId);
+      await server.save();
+
+      io.to(code).emit("message-deleted", { channelId, messageId });
+    } catch (err) {
+      console.error("Error in delete-message:", err);
     }
   });
 
