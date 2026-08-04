@@ -1,26 +1,22 @@
 # Sonder
 
-A real-time synced listening room — multiple people join a room, one host's playback controls the session, and everyone stays in sync automatically.
+A real-time server-based chat app. The host can create multiple chat rooms within their server, and everyone stays in sync instantly.
 
 ## Features
 
-- Create or join a room with a short code
-- Host-controlled playback (play/pause) synced to all participants in real time
-- Automatic host reassignment if the host disconnects
-- Live chat within the room
-- Track search powered by the Jamendo API (royalty-free music)
-- Room state persisted in MongoDB, so sessions survive rejoins
+- Server-based chat — a host can create multiple chat rooms
+- Anonymous, nickname-based identity — no accounts required
+- Real-time messaging powered by Socket.io
+- Emoji reactions on messages
+- Image uploads in chat (via Multer)
+- Message searching and deleting
+- Chat history persisted in MongoDB
 
 ## Tech Stack
 
-**Frontend:** React, Vite, Tailwind CSS, Zustand, Socket.io-client
-**Backend:** Node.js, Express, Socket.io, Mongoose
+**Frontend:** React, Vite, Tailwind CSS, Zustand, Socket.io-client, Lucide React
+**Backend:** Node.js, Express, Socket.io, Mongoose, Multer
 **Database:** MongoDB Atlas
-**Music:** Jamendo API 
-
-## How the sync engine works
-
-Whoever creates a room becomes the host. Only the host can trigger play/pause/seek events — these are broadcast via Socket.io to every other client in the room, tagged with a server timestamp so clients can reconcile network delay. If the host disconnects, the server automatically promotes another participant to host, keeping the room alive.
 
 ## Running locally
 
@@ -28,7 +24,7 @@ Whoever creates a room becomes the host. Only the host can trigger play/pause/se
 ```bash
 cd server
 npm install
-cp .env.example .env   # then fill in your MongoDB URI and Jamendo Client ID
+cp .env.example .env   # then fill in your MongoDB URI
 npm run dev
 ```
 
@@ -43,3 +39,4 @@ npm run dev
 ## Environment Variables
 
 **server/.env**
+---
