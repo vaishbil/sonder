@@ -38,5 +38,5 @@ npm run dev
 
 ## Environment Variables
 
-**server/.env**
+server/.env
 ---
