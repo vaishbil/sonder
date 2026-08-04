@@ -6,8 +6,11 @@ import http from "http";
 import { Server as SocketIOServer } from "socket.io";
 import cors from "cors";
 import mongoose from "mongoose";
+import path from "path";
 
 import serversRouter from "./routes/servers.js";
+import uploadRouter from "./routes/upload.js";
+import searchRouter from "./routes/search.js";
 import { registerServerHandlers } from "./sockets/serverSocket.js";
 
 const app = express();
@@ -25,7 +28,12 @@ const io = new SocketIOServer(server, {
 app.use(cors({ origin: CLIENT_URL }));
 app.use(express.json());
 
+// Serve uploaded files (images, attachments) as static assets
+app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
+
 app.use("/servers", serversRouter);
+app.use("/upload", uploadRouter);
+app.use("/servers", searchRouter); // adds GET /servers/:code/search
 
 app.get("/", (req, res) => {
   res.send("Mini Discord backend is running");

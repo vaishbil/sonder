@@ -2,9 +2,14 @@ import mongoose from "mongoose";
 
 const messageSchema = new mongoose.Schema(
   {
-    sender: { type: String, required: true }, // username, not socket ID
-    text: { type: String, required: true },
+    sender: { type: String, required: true },
+    text: { type: String, default: "" },
     timestamp: { type: Date, default: Date.now },
+    attachment: {
+      url: { type: String, default: null },
+      filename: { type: String, default: null },
+      type: { type: String, default: null }, // MIME type, e.g. "image/png"
+    },
   },
   { _id: false }
 );

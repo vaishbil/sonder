@@ -1,6 +1,5 @@
 import Server from "../models/Server.js";
 
-// code -> ownerSocketId, kept in-memory for fast admin checks
 const serverOwners = new Map();
 
 export function registerServerHandlers(io, socket) {
@@ -16,18 +15,19 @@ export function registerServerHandlers(io, socket) {
       socket.data.serverCode = code;
       socket.data.username = username;
 
-      // First person to join becomes the owner/admin
       if (!serverOwners.has(code)) {
         serverOwners.set(code, socket.id);
         server.ownerSocketId = socket.id;
       }
 
+      // Remove any stale entry for this username first (handles refreshes/
+      // reconnects that didn't clean up properly) so the list never shows ghosts
+      server.members = server.members.filter((m) => m.username !== username);
       server.members.push({ socketId: socket.id, username });
       await server.save();
 
       const isOwner = serverOwners.get(code) === socket.id;
 
-      // Send full server state to the joining client
       socket.emit("server-state", {
         name: server.name,
         channels: server.channels,
@@ -35,7 +35,6 @@ export function registerServerHandlers(io, socket) {
         isOwner,
       });
 
-      // Let everyone else know who joined
       socket.to(code).emit("member-joined", {
         socketId: socket.id,
         username,
@@ -47,7 +46,7 @@ export function registerServerHandlers(io, socket) {
     }
   });
 
-  socket.on("send-message", async ({ code, channelId, text }) => {
+  socket.on("send-message", async ({ code, channelId, text, attachment }) => {
     try {
       const server = await Server.findOne({ code });
       if (!server) return;
@@ -57,13 +56,12 @@ export function registerServerHandlers(io, socket) {
 
       const message = {
         sender: socket.data.username || "Unknown",
-        text,
+        text: text || "",
         timestamp: new Date(),
+        attachment: attachment || undefined,
       };
       channel.messages.push(message);
 
-      // Keep channel history bounded — fine for a portfolio scope,
-      // would move to a separate paginated Message collection at real scale
       if (channel.messages.length > 200) {
         channel.messages = channel.messages.slice(-200);
       }
@@ -87,7 +85,7 @@ export function registerServerHandlers(io, socket) {
   socket.on("create-channel", async ({ code, name }) => {
     try {
       const ownerId = serverOwners.get(code);
-      if (socket.id !== ownerId) return; // only the owner can create channels
+      if (socket.id !== ownerId) return;
 
       const server = await Server.findOne({ code });
       if (!server) return;
@@ -111,7 +109,6 @@ export function registerServerHandlers(io, socket) {
       const server = await Server.findOne({ code });
       if (!server) return;
 
-      // Never allow deleting the last remaining channel
       if (server.channels.length <= 1) return;
 
       server.channels = server.channels.filter((c) => c.channelId !== channelId);
@@ -150,7 +147,6 @@ export function registerServerHandlers(io, socket) {
         await server.save();
       }
 
-      // Reassign owner if the owner disconnected
       if (serverOwners.get(code) === socket.id) {
         serverOwners.delete(code);
         const socketsInServer = await io.in(code).fetchSockets();
