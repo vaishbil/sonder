@@ -34,6 +34,7 @@ const channelSchema = new mongoose.Schema({
 const memberSchema = new mongoose.Schema(
   {
     socketId: { type: String, required: true },
+    clientId: { type: String, required: true }, // persistent identity, survives reconnects
     username: { type: String, required: true },
     joinedAt: { type: Date, default: Date.now },
   },
@@ -44,7 +45,9 @@ const serverSchema = new mongoose.Schema(
   {
     code: { type: String, required: true, unique: true, uppercase: true },
     name: { type: String, default: "New Server" },
-    ownerSocketId: { type: String, default: null },
+    // The permanent owner is identified by clientId, not socketId — this is
+    // what lets ownership survive a disconnect/reconnect instead of resetting
+    ownerClientId: { type: String, default: null },
     channels: {
       type: [channelSchema],
       default: [{ channelId: "general", name: "general", messages: [] }],

@@ -3,10 +3,8 @@ import fs from "fs";
 import path from "path";
 import Server from "../models/Server.js";
 
-const serverOwners = new Map();
-
 export function registerServerHandlers(io, socket) {
-  socket.on("join-server", async ({ code, username }) => {
+  socket.on("join-server", async ({ code, username, clientId }) => {
     try {
       const server = await Server.findOne({ code });
       if (!server) {
@@ -17,19 +15,21 @@ export function registerServerHandlers(io, socket) {
       socket.join(code);
       socket.data.serverCode = code;
       socket.data.username = username;
+      socket.data.clientId = clientId;
 
-      if (!serverOwners.has(code)) {
-        serverOwners.set(code, socket.id);
-        server.ownerSocketId = socket.id;
+      // First-ever joiner becomes the permanent owner, tied to their
+      // persistent clientId rather than this session's socketId
+      if (!server.ownerClientId) {
+        server.ownerClientId = clientId;
       }
 
-      // Remove any stale entry for this username before adding fresh —
-      // prevents ghost duplicates from refreshes/reconnects
-      server.members = server.members.filter((m) => m.username !== username);
-      server.members.push({ socketId: socket.id, username });
+      // Remove any stale entry for this clientId before adding fresh —
+      // this is what makes reconnects clean instead of piling up ghosts
+      server.members = server.members.filter((m) => m.clientId !== clientId);
+      server.members.push({ socketId: socket.id, clientId, username });
       await server.save();
 
-      const isOwner = serverOwners.get(code) === socket.id;
+      const isOwner = clientId === server.ownerClientId;
 
       socket.emit("server-state", {
         name: server.name,
@@ -79,7 +79,6 @@ export function registerServerHandlers(io, socket) {
     }
   });
 
-  // Delete for everyone — only the original sender can do this
   socket.on("delete-message", async ({ code, channelId, messageId }) => {
     try {
       const server = await Server.findOne({ code });
@@ -91,13 +90,11 @@ export function registerServerHandlers(io, socket) {
       const message = channel.messages.find((m) => m.messageId === messageId);
       if (!message) return;
 
-      // Ownership check — only the sender can delete their own message for everyone
       if (message.sender !== socket.data.username) {
         socket.emit("error-message", "You can only delete your own messages.");
         return;
       }
 
-      // Clean up the actual file on disk if this message had an image/attachment
       if (message.attachment?.url) {
         const filePath = path.join(process.cwd(), message.attachment.url);
         fs.unlink(filePath, (err) => {
@@ -124,11 +121,9 @@ export function registerServerHandlers(io, socket) {
 
   socket.on("create-channel", async ({ code, name }) => {
     try {
-      const ownerId = serverOwners.get(code);
-      if (socket.id !== ownerId) return;
-
       const server = await Server.findOne({ code });
       if (!server) return;
+      if (socket.data.clientId !== server.ownerClientId) return;
 
       const channelId = name.toLowerCase().replace(/\s+/g, "-") + "-" + Date.now().toString(36);
       const newChannel = { channelId, name, messages: [] };
@@ -143,12 +138,9 @@ export function registerServerHandlers(io, socket) {
 
   socket.on("delete-channel", async ({ code, channelId }) => {
     try {
-      const ownerId = serverOwners.get(code);
-      if (socket.id !== ownerId) return;
-
       const server = await Server.findOne({ code });
       if (!server) return;
-
+      if (socket.data.clientId !== server.ownerClientId) return;
       if (server.channels.length <= 1) return;
 
       server.channels = server.channels.filter((c) => c.channelId !== channelId);
@@ -162,11 +154,12 @@ export function registerServerHandlers(io, socket) {
 
   socket.on("kick-member", async ({ code, targetSocketId }) => {
     try {
-      const ownerId = serverOwners.get(code);
-      if (socket.id !== ownerId || targetSocketId === ownerId) return;
+      const server = await Server.findOne({ code });
+      if (!server) return;
+      if (socket.data.clientId !== server.ownerClientId) return;
 
       const targetSocket = io.sockets.sockets.get(targetSocketId);
-      if (targetSocket) {
+      if (targetSocket && targetSocket.data.clientId !== server.ownerClientId) {
         targetSocket.emit("kicked");
         targetSocket.leave(code);
         targetSocket.disconnect(true);
@@ -187,19 +180,10 @@ export function registerServerHandlers(io, socket) {
         await server.save();
       }
 
-      if (serverOwners.get(code) === socket.id) {
-        serverOwners.delete(code);
-        const socketsInServer = await io.in(code).fetchSockets();
-        if (socketsInServer.length > 0) {
-          const newOwner = socketsInServer[0];
-          serverOwners.set(code, newOwner.id);
-          if (server) {
-            server.ownerSocketId = newOwner.id;
-            await server.save();
-          }
-          io.to(code).emit("owner-changed", { newOwnerSocketId: newOwner.id });
-        }
-      }
+      // Note: ownership is intentionally NOT reassigned here. It's tied to
+      // ownerClientId permanently, so the original owner automatically
+      // regains admin rights the moment they reconnect with the same
+      // browser (same clientId) — no manual re-election needed.
 
       socket.to(code).emit("member-left", {
         socketId: socket.id,
