@@ -537,7 +537,6 @@ export default function ServerRoom({ onLeaveServer }) {
               ))}
             </div>
           )}
-
           {showEmojiPicker && (
             <div className="absolute bottom-full right-4 mb-1 bg-white border border-[#F0DCD1] rounded-xl shadow-lg p-2 grid grid-cols-6 gap-1 z-10">
               {EMOJIS.map((emoji) => (
@@ -551,7 +550,6 @@ export default function ServerRoom({ onLeaveServer }) {
               ))}
             </div>
           )}
-
           <form onSubmit={handleSendMessage} className="p-4 flex gap-2 border-t border-[#FDEAE1]">
             <input
               ref={fileInputRef}
