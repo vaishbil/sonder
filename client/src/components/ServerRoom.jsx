@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
+import { Reply as ReplyIcon, Search as SearchIcon } from "lucide-react";
 import { socket } from "../socket";
 import { useServerStore } from "../store/useServerStore";
-import { Search, MessageSquareReply } from "lucide-react";
 
 const API_URL = import.meta.env.VITE_SERVER_URL || "http://localhost:5000";
 const AVATAR_COLORS = ["#FF6B4A", "#FFA07A", "#FF8C69", "#E9967A", "#FFB088", "#F4978E"];
@@ -84,6 +84,7 @@ export default function ServerRoom({ onLeaveServer }) {
   const [mentionSuggestions, setMentionSuggestions] = useState([]);
   const [replyingTo, setReplyingTo] = useState(null);
   const [hiddenMessageIds, setHiddenMessageIds] = useState(new Set());
+  const [linkCopied, setLinkCopied] = useState(false);
 
   const messagesEndRef = useRef(null);
   const typingTimeoutRef = useRef(null);
@@ -280,8 +281,17 @@ export default function ServerRoom({ onLeaveServer }) {
     messageInputRef.current?.focus();
   }
 
+  function handleCopyInviteLink() {
+    const inviteUrl = `${window.location.origin}${window.location.pathname}?join=${serverCode}`;
+    navigator.clipboard.writeText(inviteUrl).then(() => {
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2000);
+    });
+  }
+
   function handleLeave() {
     socket.disconnect();
+    localStorage.removeItem("sonder_last_server_code");
     reset();
     onLeaveServer();
   }
@@ -293,6 +303,12 @@ export default function ServerRoom({ onLeaveServer }) {
         <div className="mb-4">
           <h2 className="font-bold text-sm truncate text-[#3A2E2A]">{serverName || "Server"}</h2>
           <p className="text-xs text-[#B39A8F]">Code: {serverCode}</p>
+          <button
+            onClick={handleCopyInviteLink}
+            className="text-xs text-[#FF6B4A] hover:underline mt-1"
+          >
+            {linkCopied ? "Link copied!" : "Copy invite link"}
+          </button>
         </div>
 
         <div className="flex-1 overflow-y-auto space-y-1">
@@ -357,10 +373,10 @@ export default function ServerRoom({ onLeaveServer }) {
           <h3 className="font-medium"># {currentChannel?.name || currentChannelId}</h3>
           <button
             onClick={() => (showSearch ? closeSearch() : setShowSearch(true))}
-            className="text-[#B39A8F] hover:text-[#FF6B4A] text-sm"
+            className="text-[#B39A8F] hover:text-[#FF6B4A]"
             title="Search messages"
           >
-            <Search/>
+            <SearchIcon size={18} />
           </button>
         </div>
 
@@ -464,8 +480,8 @@ export default function ServerRoom({ onLeaveServer }) {
                   {/* Hover action bar */}
                   {m.messageId && (
                     <div className="opacity-0 group-hover:opacity-100 transition flex gap-3 mt-1 text-xs text-[#B39A8F]">
-                      <button onClick={() => handleReply(m)} className="hover:text-[#FF6B4A]">
-                        <MessageSquareReply/> 
+                      <button onClick={() => handleReply(m)} className="hover:text-[#FF6B4A] flex items-center gap-1">
+                        <ReplyIcon size={12} /> Reply
                       </button>
                       <button onClick={() => handleDeleteForMe(m.messageId)} className="hover:text-[#FF6B4A]">
                         Delete for me

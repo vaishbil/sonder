@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { socket } from "../socket";
 import { useServerStore } from "../store/useServerStore";
+import { getClientId } from "../clientId";
 
 const API_URL = import.meta.env.VITE_SERVER_URL || "http://localhost:5000";
 
@@ -12,15 +13,55 @@ const FEATURE_STICKERS = [
 ];
 
 export default function Home({ onEnterServer }) {
-  const [mode, setMode] = useState("create"); // "create" | "join"
+  const rememberedName = localStorage.getItem("sonder_last_username") || "";
+  const rememberedServerCode = localStorage.getItem("sonder_last_server_code") || "";
+
+  const initialJoinCode = (() => {
+    if (typeof window === "undefined") return "";
+    const params = new URLSearchParams(window.location.search);
+    return params.get("join")?.toUpperCase() || "";
+  })();
+
+  const shouldAutoRejoin = !initialJoinCode && !!rememberedServerCode && !!rememberedName;
+
+  const [mode, setMode] = useState(initialJoinCode ? "join" : "create");
   const [serverName, setServerName] = useState("");
-  const [createUsername, setCreateUsername] = useState("");
-  const [joinCode, setJoinCode] = useState("");
-  const [joinUsername, setJoinUsername] = useState("");
+  const [createUsername, setCreateUsername] = useState(rememberedName);
+  const [joinCode, setJoinCode] = useState(initialJoinCode || rememberedServerCode);
+  const [joinUsername, setJoinUsername] = useState(rememberedName);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [autoRejoining, setAutoRejoining] = useState(shouldAutoRejoin);
   const setServerCode = useServerStore((s) => s.setServerCode);
   const setUsernameStore = useServerStore((s) => s.setUsername);
+
+  function enterServer(code, username) {
+    setServerCode(code);
+    setUsernameStore(username);
+    localStorage.setItem("sonder_last_username", username);
+    localStorage.setItem("sonder_last_server_code", code);
+    if (!socket.connected) socket.connect();
+    socket.emit("join-server", { code, username, clientId: getClientId() });
+    window.history.replaceState({}, "", window.location.pathname);
+    onEnterServer();
+  }
+
+  useEffect(() => {
+    if (!shouldAutoRejoin) return;
+
+    const tryAutoRejoin = async () => {
+      try {
+        const res = await fetch(`${API_URL}/servers/${rememberedServerCode}`);
+        if (!res.ok) throw new Error();
+        enterServer(rememberedServerCode, rememberedName);
+      } catch {
+        localStorage.removeItem("sonder_last_server_code");
+        setAutoRejoining(false);
+      }
+    };
+
+    tryAutoRejoin();
+  }, [shouldAutoRejoin, rememberedServerCode, rememberedName]);
 
   async function handleCreateServer(e) {
     e.preventDefault();
@@ -62,12 +103,12 @@ export default function Home({ onEnterServer }) {
     }
   }
 
-  function enterServer(code, username) {
-    setServerCode(code);
-    setUsernameStore(username);
-    if (!socket.connected) socket.connect();
-    socket.emit("join-server", { code, username });
-    onEnterServer();
+  if (autoRejoining) {
+    return (
+      <div className="min-h-screen bg-[#FDEAE1] text-[#3A2E2A] flex items-center justify-center">
+        <p className="text-sm text-[#8A7A72]">Reconnecting to your last server...</p>
+      </div>
+    );
   }
 
   return (
@@ -175,7 +216,7 @@ export default function Home({ onEnterServer }) {
               disabled={loading}
               className="w-full bg-[#FF6B4A] hover:bg-[#FF5733] text-white rounded-xl py-3 font-medium text-sm disabled:opacity-50"
             >
-              {loading ? "Joining..." : "Join server"}
+              {loading ? "Joining..." : "Join server ↗"}
             </button>
           </form>
         )}
