@@ -522,7 +522,6 @@ export default function ServerRoom({ onLeaveServer }) {
             </button>
           </div>
         )}
-
         <div className="relative">
           {mentionSuggestions.length > 0 && (
             <div className="absolute bottom-full left-16 mb-1 bg-white border border-[#F0DCD1] rounded-xl shadow-lg overflow-hidden z-10">

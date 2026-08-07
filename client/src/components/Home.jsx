@@ -102,7 +102,6 @@ export default function Home({ onEnterServer }) {
       setLoading(false);
     }
   }
-
   if (autoRejoining) {
     return (
       <div className="min-h-screen bg-[#FDEAE1] text-[#3A2E2A] flex items-center justify-center">
