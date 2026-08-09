@@ -690,39 +690,56 @@ export default function ServerRoom({ onLeaveServer }) {
               (isOwner || (isModerator && !targetIsModerator));
 
             return (
-              <div key={m.socketId} className="flex items-center justify-between group">
+              <div key={m.socketId} className="group py-1">
                 <div className="flex items-center gap-2 min-w-0">
                   <div className="relative shrink-0">
                     <Avatar name={m.username} size={30} />
                     <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-400 border-2 border-white rounded-full" />
                   </div>
-                  <span className="text-sm text-[#3A2E2A] truncate flex items-center gap-1">
-                    {m.username}
-                    {targetIsOwner && <span title="Owner">👑</span>}
-                    {targetIsModerator && !targetIsOwner && <span title="Moderator">🛡️</span>}
-                    {isMe && <span className="text-[#B39A8F]">(you)</span>}
+                  <span className="text-sm text-[#3A2E2A] truncate flex items-center gap-1.5 min-w-0">
+                    <span className="truncate">{m.username}</span>
+                    {targetIsOwner && (
+                      <img
+                        src="https://img.icons8.com/fluency/48/crown.png"
+                        alt="Owner"
+                        title="Owner"
+                        className="w-3.5 h-3.5 shrink-0"
+                      />
+                    )}
+                    {targetIsModerator && !targetIsOwner && (
+                      <img
+                        src="https://img.icons8.com/fluency/48/shield.png"
+                        alt="Moderator"
+                        title="Moderator"
+                        className="w-3.5 h-3.5 shrink-0"
+                      />
+                    )}
+                    {isMe && <span className="text-[#B39A8F] shrink-0 text-xs">(you)</span>}
                   </span>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  {isOwner && !targetIsOwner && !isMe && (
-                    <button
-                      onClick={() =>
-                        targetIsModerator ? handleDemote(m.clientId) : handlePromote(m.clientId)
-                      }
-                      className="text-xs text-[#B39A8F] hover:text-[#FF6B4A]"
-                    >
-                      {targetIsModerator ? "remove mod" : "make mod"}
-                    </button>
-                  )}
-                  {canKick && (
-                    <button
-                      onClick={() => handleKick(m.socketId, m.username)}
-                      className="text-xs text-[#B39A8F] hover:text-red-400"
-                    >
-                      kick
-                    </button>
-                  )}
-                </div>
+
+                {(canKick || (isOwner && !targetIsOwner && !isMe)) && (
+                  <div className="opacity-0 group-hover:opacity-100 transition flex gap-3 mt-0.5 ml-9 text-xs">
+                    {isOwner && !targetIsOwner && !isMe && (
+                      <button
+                        onClick={() =>
+                          targetIsModerator ? handleDemote(m.clientId) : handlePromote(m.clientId)
+                        }
+                        className="text-[#B39A8F] hover:text-[#FF6B4A]"
+                      >
+                        {targetIsModerator ? "remove mod" : "make mod"}
+                      </button>
+                    )}
+                    {canKick && (
+                      <button
+                        onClick={() => handleKick(m.socketId, m.username)}
+                        className="text-[#B39A8F] hover:text-red-400"
+                      >
+                        kick
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })}
