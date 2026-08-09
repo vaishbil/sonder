@@ -5,6 +5,9 @@ export const useServerStore = create((set) => ({
   serverName: null,
   username: null,
   isOwner: false,
+  isModerator: false,
+  ownerClientId: null,
+  moderatorClientIds: [],
   channels: [],
   currentChannelId: "general",
   members: [],
@@ -13,9 +16,18 @@ export const useServerStore = create((set) => ({
 
   setServerCode: (code) => set({ serverCode: code }),
   setUsername: (username) => set({ username }),
-  setServerState: ({ name, channels, members, isOwner }) =>
-    set({ serverName: name, channels, members, isOwner }),
+  setServerState: ({ name, channels, members, isOwner, isModerator, ownerClientId, moderatorClientIds }) =>
+    set({
+      serverName: name,
+      channels,
+      members,
+      isOwner,
+      isModerator: isModerator || false,
+      ownerClientId: ownerClientId || null,
+      moderatorClientIds: moderatorClientIds || [],
+    }),
   setIsOwner: (isOwner) => set({ isOwner }),
+  setModeratorClientIds: (moderatorClientIds) => set({ moderatorClientIds }),
   setMembers: (members) => set({ members }),
   setCurrentChannel: (channelId) => set({ currentChannelId: channelId }),
 
@@ -33,6 +45,20 @@ export const useServerStore = create((set) => ({
       channels: state.channels.map((c) =>
         c.channelId === channelId
           ? { ...c, messages: c.messages.filter((m) => m.messageId !== messageId) }
+          : c
+      ),
+    })),
+
+  updateReactions: (channelId, messageId, reactions) =>
+    set((state) => ({
+      channels: state.channels.map((c) =>
+        c.channelId === channelId
+          ? {
+              ...c,
+              messages: c.messages.map((m) =>
+                m.messageId === messageId ? { ...m, reactions } : m
+              ),
+            }
           : c
       ),
     })),
@@ -61,6 +87,9 @@ export const useServerStore = create((set) => ({
       serverCode: null,
       serverName: null,
       isOwner: false,
+      isModerator: false,
+      ownerClientId: null,
+      moderatorClientIds: [],
       channels: [],
       currentChannelId: "general",
       members: [],

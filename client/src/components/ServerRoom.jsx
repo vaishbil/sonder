@@ -12,6 +12,8 @@ const EMOJIS = [
   "😴", "🤯", "😅", "🥺", "🫡", "🤝", "👀", "🚀", "💡", "⚡",
 ];
 
+const QUICK_REACTIONS = ["👍", "❤️", "😂", "🔥", "😮", "🙏"];
+
 function avatarColor(name) {
   const index = (name?.charCodeAt(0) || 0) % AVATAR_COLORS.length;
   return AVATAR_COLORS[index];
@@ -57,15 +59,20 @@ export default function ServerRoom({ onLeaveServer }) {
     serverName,
     username,
     isOwner,
+    isModerator,
+    ownerClientId,
+    moderatorClientIds,
     channels,
     currentChannelId,
     members,
     typingUsers,
     setServerState,
+    setModeratorClientIds,
     setMembers,
     setCurrentChannel,
     addMessage,
     removeMessage,
+    updateReactions,
     addChannel,
     removeChannel,
     setTyping,
@@ -85,6 +92,7 @@ export default function ServerRoom({ onLeaveServer }) {
   const [replyingTo, setReplyingTo] = useState(null);
   const [hiddenMessageIds, setHiddenMessageIds] = useState(new Set());
   const [linkCopied, setLinkCopied] = useState(false);
+  const [reactionPickerFor, setReactionPickerFor] = useState(null);
 
   const messagesEndRef = useRef(null);
   const typingTimeoutRef = useRef(null);
@@ -94,6 +102,7 @@ export default function ServerRoom({ onLeaveServer }) {
   const currentChannel = channels.find((c) => c.channelId === currentChannelId);
   const typingInChannel = (typingUsers[currentChannelId] || []).filter((u) => u !== username);
   const memberNames = members.map((m) => m.username);
+  const canManageChannels = isOwner || isModerator;
   const visibleMessages = (currentChannel?.messages || []).filter(
     (m) => !hiddenMessageIds.has(m.messageId)
   );
@@ -104,6 +113,12 @@ export default function ServerRoom({ onLeaveServer }) {
     socket.on("member-left", ({ members: updatedMembers }) => setMembers(updatedMembers));
     socket.on("new-message", ({ channelId, message }) => addMessage(channelId, message));
     socket.on("message-deleted", ({ channelId, messageId }) => removeMessage(channelId, messageId));
+    socket.on("reaction-updated", ({ channelId, messageId, reactions }) =>
+      updateReactions(channelId, messageId, reactions)
+    );
+    socket.on("moderators-updated", ({ moderatorClientIds }) =>
+      setModeratorClientIds(moderatorClientIds)
+    );
     socket.on("channel-created", (channel) => addChannel(channel));
     socket.on("channel-deleted", ({ channelId }) => removeChannel(channelId));
     socket.on("user-typing", ({ channelId, username: u }) => setTyping(channelId, u, true));
@@ -120,6 +135,8 @@ export default function ServerRoom({ onLeaveServer }) {
       socket.off("member-left");
       socket.off("new-message");
       socket.off("message-deleted");
+      socket.off("reaction-updated");
+      socket.off("moderators-updated");
       socket.off("channel-created");
       socket.off("channel-deleted");
       socket.off("user-typing");
@@ -281,6 +298,19 @@ export default function ServerRoom({ onLeaveServer }) {
     messageInputRef.current?.focus();
   }
 
+  function handleToggleReaction(messageId, emoji) {
+    socket.emit("toggle-reaction", { code: serverCode, channelId: currentChannelId, messageId, emoji });
+    setReactionPickerFor(null);
+  }
+
+  function handlePromote(targetClientId) {
+    socket.emit("promote-moderator", { code: serverCode, targetClientId });
+  }
+
+  function handleDemote(targetClientId) {
+    socket.emit("demote-moderator", { code: serverCode, targetClientId });
+  }
+
   function handleCopyInviteLink() {
     const inviteUrl = `${window.location.origin}${window.location.pathname}?join=${serverCode}`;
     navigator.clipboard.writeText(inviteUrl).then(() => {
@@ -325,7 +355,7 @@ export default function ServerRoom({ onLeaveServer }) {
               >
                 # {c.name}
               </button>
-              {isOwner && c.channelId !== "general" && (
+              {canManageChannels && c.channelId !== "general" && (
                 <button
                   onClick={() => handleDeleteChannel(c.channelId)}
                   className="opacity-0 group-hover:opacity-100 text-[#B39A8F] hover:text-red-400 text-xs px-1"
@@ -336,7 +366,7 @@ export default function ServerRoom({ onLeaveServer }) {
             </div>
           ))}
 
-          {isOwner && (
+          {canManageChannels && (
             <div className="mt-2">
               {showNewChannelInput ? (
                 <form onSubmit={handleCreateChannel} className="flex gap-1">
@@ -477,9 +507,40 @@ export default function ServerRoom({ onLeaveServer }) {
                     </div>
                   )}
 
+                  {/* Reaction pills */}
+                  {m.reactions?.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {m.reactions.map((r) => {
+                        const iReacted = r.usernames.includes(username);
+                        return (
+                          <button
+                            key={r.emoji}
+                            onClick={() => handleToggleReaction(m.messageId, r.emoji)}
+                            className={`text-xs rounded-full px-2 py-0.5 border transition ${
+                              iReacted
+                                ? "bg-[#FFE3D6] border-[#FF6B4A] text-[#FF6B4A]"
+                                : "bg-[#FDEAE1] border-transparent text-[#8A7A72] hover:border-[#F0DCD1]"
+                            }`}
+                            title={r.usernames.join(", ")}
+                          >
+                            {r.emoji} {r.usernames.length}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
                   {/* Hover action bar */}
                   {m.messageId && (
-                    <div className="opacity-0 group-hover:opacity-100 transition flex gap-3 mt-1 text-xs text-[#B39A8F]">
+                    <div className="relative opacity-0 group-hover:opacity-100 transition flex gap-3 mt-1 text-xs text-[#B39A8F]">
+                      <button
+                        onClick={() =>
+                          setReactionPickerFor(reactionPickerFor === m.messageId ? null : m.messageId)
+                        }
+                        className="hover:text-[#FF6B4A]"
+                      >
+                        😀 React
+                      </button>
                       <button onClick={() => handleReply(m)} className="hover:text-[#FF6B4A] flex items-center gap-1">
                         <ReplyIcon size={12} /> Reply
                       </button>
@@ -493,6 +554,20 @@ export default function ServerRoom({ onLeaveServer }) {
                         >
                           Delete for everyone
                         </button>
+                      )}
+
+                      {reactionPickerFor === m.messageId && (
+                        <div className="absolute bottom-full left-0 mb-1 bg-white border border-[#F0DCD1] rounded-xl shadow-lg p-1.5 flex gap-1 z-10">
+                          {QUICK_REACTIONS.map((emoji) => (
+                            <button
+                              key={emoji}
+                              onClick={() => handleToggleReaction(m.messageId, emoji)}
+                              className="text-lg hover:bg-[#FDEAE1] rounded p-1"
+                            >
+                              {emoji}
+                            </button>
+                          ))}
+                        </div>
                       )}
                     </div>
                   )}
@@ -522,6 +597,7 @@ export default function ServerRoom({ onLeaveServer }) {
             </button>
           </div>
         )}
+
         <div className="relative">
           {mentionSuggestions.length > 0 && (
             <div className="absolute bottom-full left-16 mb-1 bg-white border border-[#F0DCD1] rounded-xl shadow-lg overflow-hidden z-10">
@@ -537,6 +613,7 @@ export default function ServerRoom({ onLeaveServer }) {
               ))}
             </div>
           )}
+
           {showEmojiPicker && (
             <div className="absolute bottom-full right-4 mb-1 bg-white border border-[#F0DCD1] rounded-xl shadow-lg p-2 grid grid-cols-6 gap-1 z-10">
               {EMOJIS.map((emoji) => (
@@ -550,6 +627,7 @@ export default function ServerRoom({ onLeaveServer }) {
               ))}
             </div>
           )}
+
           <form onSubmit={handleSendMessage} className="p-4 flex gap-2 border-t border-[#FDEAE1]">
             <input
               ref={fileInputRef}
@@ -599,30 +677,55 @@ export default function ServerRoom({ onLeaveServer }) {
           Online — {members.length}
         </p>
         <div className="space-y-2">
-          {members.map((m) => (
-            <div key={m.socketId} className="flex items-center justify-between group">
-              <div className="flex items-center gap-2 min-w-0">
-                <div className="relative shrink-0">
-                  <Avatar name={m.username} size={30} />
-                  <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-400 border-2 border-white rounded-full" />
+          {members.map((m) => {
+            const targetIsOwner = m.clientId === ownerClientId;
+            const targetIsModerator = moderatorClientIds.includes(m.clientId);
+            const isMe = m.socketId === socket.id;
+
+            // Only the owner can kick a moderator (or the owner, never);
+            // moderators can kick regular members only
+            const canKick =
+              !isMe &&
+              !targetIsOwner &&
+              (isOwner || (isModerator && !targetIsModerator));
+
+            return (
+              <div key={m.socketId} className="flex items-center justify-between group">
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="relative shrink-0">
+                    <Avatar name={m.username} size={30} />
+                    <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-400 border-2 border-white rounded-full" />
+                  </div>
+                  <span className="text-sm text-[#3A2E2A] truncate flex items-center gap-1">
+                    {m.username}
+                    {targetIsOwner && <span title="Owner">👑</span>}
+                    {targetIsModerator && !targetIsOwner && <span title="Moderator">🛡️</span>}
+                    {isMe && <span className="text-[#B39A8F]">(you)</span>}
+                  </span>
                 </div>
-                <span className="text-sm text-[#3A2E2A] truncate">
-                  {m.username}
-                  {m.socketId === socket.id && (
-                    <span className="text-[#B39A8F]"> (you)</span>
+                <div className="flex items-center gap-2 shrink-0">
+                  {isOwner && !targetIsOwner && !isMe && (
+                    <button
+                      onClick={() =>
+                        targetIsModerator ? handleDemote(m.clientId) : handlePromote(m.clientId)
+                      }
+                      className="text-xs text-[#B39A8F] hover:text-[#FF6B4A]"
+                    >
+                      {targetIsModerator ? "remove mod" : "make mod"}
+                    </button>
                   )}
-                </span>
+                  {canKick && (
+                    <button
+                      onClick={() => handleKick(m.socketId, m.username)}
+                      className="text-xs text-[#B39A8F] hover:text-red-400"
+                    >
+                      kick
+                    </button>
+                  )}
+                </div>
               </div>
-              {isOwner && m.socketId !== socket.id && (
-                <button
-                  onClick={() => handleKick(m.socketId, m.username)}
-                  className="text-xs text-[#B39A8F] hover:text-red-400 shrink-0"
-                >
-                  kick
-                </button>
-              )}
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>
