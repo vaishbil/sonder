@@ -121,7 +121,7 @@ export default function Home({ onEnterServer }) {
           sonder <span className="text-[#FF6B4A]">✦</span>
         </h1>
         <p className="text-sm text-[#8A7A72] mt-2">
-          your server. your rules. right now.
+          Connection, uninterrupted.
         </p>
       </div>
 
