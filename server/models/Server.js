@@ -9,6 +9,14 @@ const replyToSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const reactionSchema = new mongoose.Schema(
+  {
+    emoji: { type: String, required: true },
+    usernames: { type: [String], default: [] },
+  },
+  { _id: false }
+);
+
 const messageSchema = new mongoose.Schema(
   {
     messageId: { type: String, required: true },
@@ -21,6 +29,7 @@ const messageSchema = new mongoose.Schema(
       type: { type: String, default: null },
     },
     replyTo: { type: replyToSchema, default: null },
+    reactions: { type: [reactionSchema], default: [] },
   },
   { _id: false }
 );
@@ -34,7 +43,7 @@ const channelSchema = new mongoose.Schema({
 const memberSchema = new mongoose.Schema(
   {
     socketId: { type: String, required: true },
-    clientId: { type: String, required: true }, // persistent identity, survives reconnects
+    clientId: { type: String, required: true },
     username: { type: String, required: true },
     joinedAt: { type: Date, default: Date.now },
   },
@@ -45,9 +54,8 @@ const serverSchema = new mongoose.Schema(
   {
     code: { type: String, required: true, unique: true, uppercase: true },
     name: { type: String, default: "New Server" },
-    // The permanent owner is identified by clientId, not socketId — this is
-    // what lets ownership survive a disconnect/reconnect instead of resetting
     ownerClientId: { type: String, default: null },
+    moderatorClientIds: { type: [String], default: [] },
     channels: {
       type: [channelSchema],
       default: [{ channelId: "general", name: "general", messages: [] }],

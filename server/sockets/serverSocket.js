@@ -3,6 +3,10 @@ import fs from "fs";
 import path from "path";
 import Server from "../models/Server.js";
 
+function isAdmin(server, clientId) {
+  return clientId === server.ownerClientId || server.moderatorClientIds.includes(clientId);
+}
+
 export function registerServerHandlers(io, socket) {
   socket.on("join-server", async ({ code, username, clientId }) => {
     try {
@@ -17,25 +21,25 @@ export function registerServerHandlers(io, socket) {
       socket.data.username = username;
       socket.data.clientId = clientId;
 
-      // First-ever joiner becomes the permanent owner, tied to their
-      // persistent clientId rather than this session's socketId
       if (!server.ownerClientId) {
         server.ownerClientId = clientId;
       }
 
-      // Remove any stale entry for this clientId before adding fresh —
-      // this is what makes reconnects clean instead of piling up ghosts
       server.members = server.members.filter((m) => m.clientId !== clientId);
       server.members.push({ socketId: socket.id, clientId, username });
       await server.save();
 
       const isOwner = clientId === server.ownerClientId;
+      const isModerator = server.moderatorClientIds.includes(clientId);
 
       socket.emit("server-state", {
         name: server.name,
         channels: server.channels,
         members: server.members,
         isOwner,
+        isModerator,
+        ownerClientId: server.ownerClientId,
+        moderatorClientIds: server.moderatorClientIds,
       });
 
       socket.to(code).emit("member-joined", {
@@ -64,6 +68,7 @@ export function registerServerHandlers(io, socket) {
         timestamp: new Date(),
         attachment: attachment || undefined,
         replyTo: replyTo || undefined,
+        reactions: [],
       };
       channel.messages.push(message);
 
@@ -76,6 +81,46 @@ export function registerServerHandlers(io, socket) {
       io.to(code).emit("new-message", { channelId, message });
     } catch (err) {
       console.error("Error in send-message:", err);
+    }
+  });
+
+  // Toggle an emoji reaction on a message — adds it if the user hasn't
+  // reacted with that emoji yet, removes it if they have (like a like button)
+  socket.on("toggle-reaction", async ({ code, channelId, messageId, emoji }) => {
+    try {
+      const server = await Server.findOne({ code });
+      if (!server) return;
+
+      const channel = server.channels.find((c) => c.channelId === channelId);
+      if (!channel) return;
+
+      const message = channel.messages.find((m) => m.messageId === messageId);
+      if (!message) return;
+
+      const username = socket.data.username;
+      let reaction = message.reactions.find((r) => r.emoji === emoji);
+
+      if (!reaction) {
+        reaction = { emoji, usernames: [username] };
+        message.reactions.push(reaction);
+      } else if (reaction.usernames.includes(username)) {
+        reaction.usernames = reaction.usernames.filter((u) => u !== username);
+      } else {
+        reaction.usernames.push(username);
+      }
+
+      // Clean up reactions nobody has anymore
+      message.reactions = message.reactions.filter((r) => r.usernames.length > 0);
+
+      await server.save();
+
+      io.to(code).emit("reaction-updated", {
+        channelId,
+        messageId,
+        reactions: message.reactions,
+      });
+    } catch (err) {
+      console.error("Error in toggle-reaction:", err);
     }
   });
 
@@ -123,7 +168,7 @@ export function registerServerHandlers(io, socket) {
     try {
       const server = await Server.findOne({ code });
       if (!server) return;
-      if (socket.data.clientId !== server.ownerClientId) return;
+      if (!isAdmin(server, socket.data.clientId)) return;
 
       const channelId = name.toLowerCase().replace(/\s+/g, "-") + "-" + Date.now().toString(36);
       const newChannel = { channelId, name, messages: [] };
@@ -140,7 +185,7 @@ export function registerServerHandlers(io, socket) {
     try {
       const server = await Server.findOne({ code });
       if (!server) return;
-      if (socket.data.clientId !== server.ownerClientId) return;
+      if (!isAdmin(server, socket.data.clientId)) return;
       if (server.channels.length <= 1) return;
 
       server.channels = server.channels.filter((c) => c.channelId !== channelId);
@@ -156,16 +201,62 @@ export function registerServerHandlers(io, socket) {
     try {
       const server = await Server.findOne({ code });
       if (!server) return;
-      if (socket.data.clientId !== server.ownerClientId) return;
+
+      const actorClientId = socket.data.clientId;
+      if (!isAdmin(server, actorClientId)) return;
 
       const targetSocket = io.sockets.sockets.get(targetSocketId);
-      if (targetSocket && targetSocket.data.clientId !== server.ownerClientId) {
-        targetSocket.emit("kicked");
-        targetSocket.leave(code);
-        targetSocket.disconnect(true);
-      }
+      if (!targetSocket) return;
+
+      const targetClientId = targetSocket.data.clientId;
+      const targetIsOwner = targetClientId === server.ownerClientId;
+      const targetIsModerator = server.moderatorClientIds.includes(targetClientId);
+      const actorIsOwner = actorClientId === server.ownerClientId;
+
+      // Only the owner can remove the owner (never) or another moderator —
+      // moderators can only kick regular members
+      if (targetIsOwner) return;
+      if (targetIsModerator && !actorIsOwner) return;
+
+      targetSocket.emit("kicked");
+      targetSocket.leave(code);
+      targetSocket.disconnect(true);
     } catch (err) {
       console.error("Error in kick-member:", err);
+    }
+  });
+
+  // Only the owner can promote/demote moderators
+  socket.on("promote-moderator", async ({ code, targetClientId }) => {
+    try {
+      const server = await Server.findOne({ code });
+      if (!server) return;
+      if (socket.data.clientId !== server.ownerClientId) return;
+      if (targetClientId === server.ownerClientId) return;
+
+      if (!server.moderatorClientIds.includes(targetClientId)) {
+        server.moderatorClientIds.push(targetClientId);
+        await server.save();
+      }
+
+      io.to(code).emit("moderators-updated", { moderatorClientIds: server.moderatorClientIds });
+    } catch (err) {
+      console.error("Error in promote-moderator:", err);
+    }
+  });
+
+  socket.on("demote-moderator", async ({ code, targetClientId }) => {
+    try {
+      const server = await Server.findOne({ code });
+      if (!server) return;
+      if (socket.data.clientId !== server.ownerClientId) return;
+
+      server.moderatorClientIds = server.moderatorClientIds.filter((id) => id !== targetClientId);
+      await server.save();
+
+      io.to(code).emit("moderators-updated", { moderatorClientIds: server.moderatorClientIds });
+    } catch (err) {
+      console.error("Error in demote-moderator:", err);
     }
   });
 
@@ -179,11 +270,6 @@ export function registerServerHandlers(io, socket) {
         server.members = server.members.filter((m) => m.socketId !== socket.id);
         await server.save();
       }
-
-      // Note: ownership is intentionally NOT reassigned here. It's tied to
-      // ownerClientId permanently, so the original owner automatically
-      // regains admin rights the moment they reconnect with the same
-      // browser (same clientId) — no manual re-election needed.
 
       socket.to(code).emit("member-left", {
         socketId: socket.id,
