@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Reply as ReplyIcon, Search as SearchIcon } from "lucide-react";
+import { Reply as ReplyIcon, Search as SearchIcon, Menu as MenuIcon, Users as UsersIcon, X as CloseIcon } from "lucide-react";
 import { socket } from "../socket";
 import { useServerStore } from "../store/useServerStore";
 
@@ -93,6 +93,8 @@ export default function ServerRoom({ onLeaveServer }) {
   const [hiddenMessageIds, setHiddenMessageIds] = useState(new Set());
   const [linkCopied, setLinkCopied] = useState(false);
   const [reactionPickerFor, setReactionPickerFor] = useState(null);
+  const [showChannelSidebar, setShowChannelSidebar] = useState(false);
+  const [showMemberList, setShowMemberList] = useState(false);
 
   const messagesEndRef = useRef(null);
   const typingTimeoutRef = useRef(null);
@@ -328,16 +330,39 @@ export default function ServerRoom({ onLeaveServer }) {
 
   return (
     <div className="min-h-screen bg-[#FDEAE1] text-[#3A2E2A] flex">
+      {/* Backdrop for mobile sidebar/member-list overlays */}
+      {(showChannelSidebar || showMemberList) && (
+        <div
+          className="fixed inset-0 bg-black/30 z-20 md:hidden"
+          onClick={() => {
+            setShowChannelSidebar(false);
+            setShowMemberList(false);
+          }}
+        />
+      )}
+
       {/* Channel sidebar */}
-      <div className="w-56 bg-white m-3 mr-0 rounded-2xl flex flex-col p-4 shadow-sm">
-        <div className="mb-4">
-          <h2 className="font-bold text-sm truncate text-[#3A2E2A]">{serverName || "Server"}</h2>
-          <p className="text-xs text-[#B39A8F]">Code: {serverCode}</p>
+      <div
+        className={`fixed md:static inset-y-0 left-0 z-30 w-64 md:w-56 bg-white m-3 md:mr-0 rounded-2xl flex flex-col p-4 shadow-sm transition-transform duration-200 ${
+          showChannelSidebar ? "translate-x-0" : "-translate-x-[110%]"
+        } md:translate-x-0`}
+      >
+        <div className="mb-4 flex items-start justify-between">
+          <div>
+            <h2 className="font-bold text-sm truncate text-[#3A2E2A]">{serverName || "Server"}</h2>
+            <p className="text-xs text-[#B39A8F]">Code: {serverCode}</p>
+            <button
+              onClick={handleCopyInviteLink}
+              className="text-xs text-[#FF6B4A] hover:underline mt-1"
+            >
+              {linkCopied ? "Link copied!" : "Copy invite link"}
+            </button>
+          </div>
           <button
-            onClick={handleCopyInviteLink}
-            className="text-xs text-[#FF6B4A] hover:underline mt-1"
+            onClick={() => setShowChannelSidebar(false)}
+            className="md:hidden text-[#B39A8F] hover:text-[#FF6B4A] shrink-0"
           >
-            {linkCopied ? "Link copied!" : "Copy invite link"}
+            <CloseIcon size={18} />
           </button>
         </div>
 
@@ -399,15 +424,33 @@ export default function ServerRoom({ onLeaveServer }) {
 
       {/* Chat area */}
       <div className="flex-1 flex flex-col m-3 bg-white rounded-2xl shadow-sm overflow-hidden">
-        <div className="border-b border-[#FDEAE1] px-5 py-4 flex items-center justify-between">
-          <h3 className="font-medium"># {currentChannel?.name || currentChannelId}</h3>
-          <button
-            onClick={() => (showSearch ? closeSearch() : setShowSearch(true))}
-            className="text-[#B39A8F] hover:text-[#FF6B4A]"
-            title="Search messages"
-          >
-            <SearchIcon size={18} />
-          </button>
+        <div className="border-b border-[#FDEAE1] px-5 py-4 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <button
+              onClick={() => setShowChannelSidebar(true)}
+              className="md:hidden text-[#B39A8F] hover:text-[#FF6B4A] shrink-0"
+              title="Channels"
+            >
+              <MenuIcon size={18} />
+            </button>
+            <h3 className="font-medium truncate"># {currentChannel?.name || currentChannelId}</h3>
+          </div>
+          <div className="flex items-center gap-3 shrink-0">
+            <button
+              onClick={() => (showSearch ? closeSearch() : setShowSearch(true))}
+              className="text-[#B39A8F] hover:text-[#FF6B4A]"
+              title="Search messages"
+            >
+              <SearchIcon size={18} />
+            </button>
+            <button
+              onClick={() => setShowMemberList(true)}
+              className="md:hidden text-[#B39A8F] hover:text-[#FF6B4A]"
+              title="Members"
+            >
+              <UsersIcon size={18} />
+            </button>
+          </div>
         </div>
 
         {showSearch && (
@@ -672,10 +715,22 @@ export default function ServerRoom({ onLeaveServer }) {
       </div>
 
       {/* Member list */}
-      <div className="w-52 bg-white m-3 ml-0 rounded-2xl p-4 shadow-sm">
-        <p className="text-xs text-[#B39A8F] uppercase tracking-wide mb-3">
-          Online — {members.length}
-        </p>
+      <div
+        className={`fixed md:static inset-y-0 right-0 z-30 w-64 md:w-52 bg-white m-3 md:ml-0 rounded-2xl p-4 shadow-sm transition-transform duration-200 overflow-y-auto ${
+          showMemberList ? "translate-x-0" : "translate-x-[110%]"
+        } md:translate-x-0`}
+      >
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-xs text-[#B39A8F] uppercase tracking-wide">
+            Online — {members.length}
+          </p>
+          <button
+            onClick={() => setShowMemberList(false)}
+            className="md:hidden text-[#B39A8F] hover:text-[#FF6B4A]"
+          >
+            <CloseIcon size={18} />
+          </button>
+        </div>
         <div className="space-y-2">
           {members.map((m) => {
             const targetIsOwner = m.clientId === ownerClientId;
