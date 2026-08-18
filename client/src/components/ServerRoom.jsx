@@ -501,19 +501,25 @@ export default function ServerRoom({ onLeaveServer }) {
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
           {visibleMessages.map((m) => {
             const isOwnMessage = m.sender === username;
-            const fullImageUrl = m.attachment?.url ? `${API_URL}${m.attachment.url}` : null;
+            const fullImageUrl = m.attachment?.url
+              ? m.attachment.url.startsWith("http")
+                ? m.attachment.url
+                : `${API_URL}${m.attachment.url}`
+              : null;
 
             return (
               <div key={m.messageId || m.timestamp} className="flex items-start gap-2 group">
                 <Avatar name={m.sender} size={28} />
                 <div className="min-w-0 flex-1">
-                  <span className="font-medium text-sm text-[#3A2E2A]">{m.sender}</span>{" "}
-                  <span className="text-[#B39A8F] text-xs">
-                    {new Date(m.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                  </span>
+                  <div className="flex items-baseline gap-2">
+                    <span className="font-medium text-sm text-[#3A2E2A]">{m.sender}</span>
+                    <span className="text-[#B39A8F] text-xs">
+                      {new Date(m.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                    </span>
+                  </div>
 
                   {m.replyTo && (
-                    <div className="border-l-2 border-[#FF6B4A] pl-2 mb-1 mt-1">
+                    <div className="border-l-2 border-[#FF6B4A] pl-2 mb-1 mt-0.5">
                       <p className="text-xs text-[#B39A8F]">
                         Replying to <span className="font-medium">{m.replyTo.sender}</span>
                       </p>
@@ -524,13 +530,13 @@ export default function ServerRoom({ onLeaveServer }) {
                   <MessageText text={m.text} memberNames={memberNames} />
 
                   {fullImageUrl && (
-                    <div className="relative inline-block mt-1">
+                    <div className="relative inline-block mt-0.5">
                       <a href={fullImageUrl} target="_blank" rel="noopener noreferrer">
                         {m.attachment.type?.startsWith("image/") ? (
                           <img
                             src={fullImageUrl}
                             alt={m.attachment.filename}
-                            className="max-w-xs max-h-64 rounded-xl border border-[#F0DCD1]"
+                            className="max-w-[240px] max-h-[240px] w-auto h-auto object-cover rounded-lg border border-[#F0DCD1] block"
                           />
                         ) : (
                           <span className="inline-flex items-center gap-2 bg-[#FDEAE1] rounded-lg px-3 py-2 text-xs text-[#8A7A72] hover:bg-[#FFE3D6]">
