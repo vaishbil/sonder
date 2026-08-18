@@ -19,6 +19,27 @@ function avatarColor(name) {
   return AVATAR_COLORS[index];
 }
 
+function isSameDay(a, b) {
+  const dateA = new Date(a);
+  const dateB = new Date(b);
+  return (
+    dateA.getFullYear() === dateB.getFullYear() &&
+    dateA.getMonth() === dateB.getMonth() &&
+    dateA.getDate() === dateB.getDate()
+  );
+}
+
+function formatDateDivider(timestamp) {
+  const date = new Date(timestamp);
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+
+  if (isSameDay(date, today)) return "Today";
+  if (isSameDay(date, yesterday)) return "Yesterday";
+  return date.toLocaleDateString([], { month: "long", day: "numeric", year: "numeric" });
+}
+
 function Avatar({ name, size = 32 }) {
   return (
     <div
@@ -329,7 +350,7 @@ export default function ServerRoom({ onLeaveServer }) {
   }
 
   return (
-    <div className="min-h-screen bg-[#FDEAE1] text-[#3A2E2A] flex">
+    <div className="h-screen overflow-hidden bg-[#FDEAE1] text-[#3A2E2A] flex">
       {/* Backdrop for mobile sidebar/member-list overlays */}
       {(showChannelSidebar || showMemberList) && (
         <div
@@ -499,7 +520,10 @@ export default function ServerRoom({ onLeaveServer }) {
         )}
 
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
-          {visibleMessages.map((m) => {
+          {visibleMessages.map((m, index) => {
+            const previousMessage = visibleMessages[index - 1];
+            const showDateDivider =
+              index === 0 || !isSameDay(m.timestamp, previousMessage.timestamp);
             const isOwnMessage = m.sender === username;
             const fullImageUrl = m.attachment?.url
               ? m.attachment.url.startsWith("http")
@@ -508,7 +532,17 @@ export default function ServerRoom({ onLeaveServer }) {
               : null;
 
             return (
-              <div key={m.messageId || m.timestamp} className="flex items-start gap-2 group">
+              <div key={m.messageId || m.timestamp}>
+                {showDateDivider && (
+                  <div className="flex items-center gap-3 my-3">
+                    <div className="flex-1 h-px bg-[#F0DCD1]" />
+                    <span className="text-xs text-[#B39A8F] shrink-0">
+                      {formatDateDivider(m.timestamp)}
+                    </span>
+                    <div className="flex-1 h-px bg-[#F0DCD1]" />
+                  </div>
+                )}
+                <div className="flex items-start gap-2 group">
                 <Avatar name={m.sender} size={28} />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline gap-2">
@@ -621,6 +655,7 @@ export default function ServerRoom({ onLeaveServer }) {
                     </div>
                   )}
                 </div>
+              </div>
               </div>
             );
           })}
