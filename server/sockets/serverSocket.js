@@ -1,6 +1,5 @@
 import crypto from "crypto";
-import fs from "fs";
-import path from "path";
+import { v2 as cloudinary } from "cloudinary";
 import Server from "../models/Server.js";
 
 function isAdmin(server, clientId) {
@@ -140,11 +139,22 @@ export function registerServerHandlers(io, socket) {
         return;
       }
 
-      if (message.attachment?.url) {
-        const filePath = path.join(process.cwd(), message.attachment.url);
-        fs.unlink(filePath, (err) => {
-          if (err) console.error("Failed to delete attachment file:", err.message);
+      if (message.attachment?.publicId) {
+        // Configured here (not at module load time) so dotenv has
+        // definitely finished loading the credentials by this point
+        cloudinary.config({
+          cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+          api_key: process.env.CLOUDINARY_API_KEY,
+          api_secret: process.env.CLOUDINARY_API_SECRET,
         });
+
+        try {
+          await cloudinary.uploader.destroy(message.attachment.publicId);
+        } catch (cloudErr) {
+          console.error("Failed to delete Cloudinary asset:", cloudErr.message);
+          // Don't block the message deletion just because the Cloudinary
+          // cleanup failed — the message itself should still be removable
+        }
       }
 
       channel.messages = channel.messages.filter((m) => m.messageId !== messageId);

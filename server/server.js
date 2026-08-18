@@ -28,8 +28,8 @@ const io = new SocketIOServer(server, {
 app.use(cors({ origin: CLIENT_URL }));
 app.use(express.json());
 
-// Serve uploaded files (images, attachments) as static assets
-app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
+
+
 
 app.use("/servers", serversRouter);
 app.use("/upload", uploadRouter);

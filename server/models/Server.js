@@ -27,6 +27,7 @@ const messageSchema = new mongoose.Schema(
       url: { type: String, default: null },
       filename: { type: String, default: null },
       type: { type: String, default: null },
+      publicId: { type: String, default: null },
     },
     replyTo: { type: replyToSchema, default: null },
     reactions: { type: [reactionSchema], default: [] },
