@@ -1,5 +1,7 @@
 # Sonder
 
+🔗 **Live site:** https://sonder-tau-six.vercel.app/
+
 A real-time community chat platform — create servers, organize conversations into channels, and chat live with friends.
 
 ## Features
