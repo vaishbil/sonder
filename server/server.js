@@ -33,10 +33,10 @@ app.use(express.json());
 
 app.use("/servers", serversRouter);
 app.use("/upload", uploadRouter);
-app.use("/servers", searchRouter); // adds GET /servers/:code/search
+app.use("/servers", searchRouter); 
 
 app.get("/", (req, res) => {
-  res.send("Mini Discord backend is running");
+  res.send("Sonder backend is running");
 });
 
 io.on("connection", (socket) => {
